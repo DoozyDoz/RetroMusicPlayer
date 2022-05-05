@@ -146,6 +146,10 @@ class PlaybackHandler extends Handler {
 
           case AudioManager.AUDIOFOCUS_LOSS:
             // Lost focus for an unbounded amount of time: stop playback and release media playback
+            if (service.sFocusEnabled) {
+              tryToGetAudioFocus()
+            }
+            service.tryToGetAudioFocus();
             service.forcePause();
             break;
 

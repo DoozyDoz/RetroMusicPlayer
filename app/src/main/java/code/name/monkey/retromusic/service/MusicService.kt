@@ -85,6 +85,7 @@ import code.name.monkey.retromusic.util.PreferenceUtil.isHeadsetPlugged
 import code.name.monkey.retromusic.util.PreferenceUtil.isLockScreen
 import code.name.monkey.retromusic.util.PreferenceUtil.isPauseOnZeroVolume
 import code.name.monkey.retromusic.util.PreferenceUtil.playbackSpeed
+import code.name.monkey.retromusic.util.PreferenceUtil.isAudioFocusEnabled
 import code.name.monkey.retromusic.util.PreferenceUtil.registerOnSharedPreferenceChangedListener
 import code.name.monkey.retromusic.util.PreferenceUtil.unregisterOnSharedPreferenceChangedListener
 import code.name.monkey.retromusic.util.RetroUtil
@@ -99,6 +100,13 @@ import java.util.*
 /**
  * @author Karim Abou Zeid (kabouzeid), Andrew Neal. Modified by Prathamesh More
  */
+
+// We don't have audio focus, and can't duck (play at a low volume)
+private const val AUDIO_NO_FOCUS_NO_DUCK = 0
+
+// We have full audio focus
+private const val AUDIO_FOCUSED = 2
+
 class MusicService : MediaBrowserServiceCompat(),
     OnSharedPreferenceChangeListener, PlaybackCallbacks, OnAudioVolumeChangedListener {
     private val musicBind: IBinder = MusicBinder()
@@ -858,6 +866,10 @@ class MusicService : MediaBrowserServiceCompat(),
     fun play() {
         if (requestFocus()) {
             if (playback != null && !playback!!.isPlaying) {
+                if (sFocusEnabled) {
+                    tryToGetAudioFocus()
+                }
+
                 if (!playback!!.isInitialized) {
                     playSongAt(getPosition())
                 } else {
@@ -1444,6 +1456,52 @@ class MusicService : MediaBrowserServiceCompat(),
         mediaSession?.setCallback(mediasessionCallback)
         mediaSession?.isActive = true
     }
+
+    private var mAudioManager: AudioManager? = null
+    private lateinit var mAudioFocusRequestCompat: AudioFocusRequestCompat
+    private var mCurrentAudioFocusState = AUDIO_NO_FOCUS_NO_DUCK
+    private val sFocusEnabled get() = isAudioFocusEnabled
+
+
+
+
+    fun tryToGetAudioFocus() {
+        if (!::mAudioFocusRequestCompat.isInitialized) {
+            initializeAudioFocusRequestCompat()
+        }
+        mAudioManager?.let { am ->
+            val requestFocus =
+                AudioManagerCompat.requestAudioFocus(am, mAudioFocusRequestCompat)
+            mCurrentAudioFocusState = when (requestFocus) {
+                AudioManager.AUDIOFOCUS_REQUEST_GRANTED -> AUDIO_FOCUSED
+                else -> AUDIO_NO_FOCUS_NO_DUCK
+            }
+        }
+    }
+
+    fun giveUpAudioFocus() {
+        if (::mAudioFocusRequestCompat.isInitialized) {
+            mAudioManager?.let { am ->
+                AudioManagerCompat.abandonAudioFocusRequest(am, mAudioFocusRequestCompat)
+                mCurrentAudioFocusState = AUDIO_NO_FOCUS_NO_DUCK
+            }
+        }
+    }
+
+    private fun initializeAudioFocusRequestCompat() {
+        val audioAttributes = AudioAttributesCompat.Builder()
+            .setUsage(AudioAttributesCompat.USAGE_MEDIA)
+            .setContentType(AudioAttributesCompat.CONTENT_TYPE_MUSIC)
+            .build()
+        mAudioFocusRequestCompat =
+            AudioFocusRequestCompat.Builder(AudioManagerCompat.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(audioAttributes)
+                .setWillPauseWhenDucked(true)
+                .setOnAudioFocusChangeListener(audioFocusListener)
+                .build()
+    }
+
+
 
     inner class MusicBinder : Binder() {
         val service: MusicService
